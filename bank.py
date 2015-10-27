@@ -1,4 +1,5 @@
 import abc
+import random
 import statistics
 
 import customer
@@ -15,27 +16,34 @@ class Bank(object):
         self.line_count = line_count
 
     @abc.abstractmethod
-    def handle_arrival(self, lines):
+    def handle_arrival(self, lines, new_customer):
         """Determines which line an arrival should go to."""
 
     @abc.abstractmethod
     def handle_service(self, lines):
         """Determines which line should be served first."""
 
-    def run(self, debug=False):
+    def run(self, iterations, debug=False):
+        line_lengths, wait_times = [], []
+        for _ in range(iterations):
+            line_length, wait_time = self.run_trial(debug)
+            line_lengths.append(line_length)
+            wait_times.append(wait_time)
+        return statistics.mean(line_lengths), statistics.mean(wait_times)
+
+    def run_trial(self, debug=False):
         """Runs a single trial of the bank."""
         lines, wait_times, line_lengths = [[] for _ in range(self.line_count)], [], []
         arrivals = times.file_times(settings.ARRIVAL_FILE) if debug else times.random_times(settings.ARRIVAL_PROBS)
         services = times.file_times(settings.SERVICE_FILE) if debug else times.random_times(settings.SERVICE_PROBS)
         current_time, arrival_time, service_times = 0, arrivals.__next__(), [0 for _ in range(self.teller_count)]
 
-        lines_to_count = []
         in_service = [False for _ in range(self.teller_count)]
-        customers_left = 150 if debug is None else settings.DEBUG_EXAMPLES
+        customers_left = settings.DEBUG_EXAMPLES if debug else settings.CUSTOMER_COUNT
 
         def print_debug(tag, newline=False):
             """Prints debug information."""
-            if debug:
+            if debug: # REPAIR
                 args = (lines, current_time, arrival_time, service_times, in_service, customers_left, tag)
                 output = "{} CT:{} AT:{} ST:{} IS:{} CR:{} ({})".format(*args)
                 output += "\n" if newline else ""
@@ -50,15 +58,19 @@ class Bank(object):
             for i in range(self.teller_count):
                 if in_service[i] and service_times[i] <= current_time:
                     in_service[i] = False
+                    for line in lines:
+                        for i in range(len(line)):
+                            line[i].line_length += 1
+
             # Print debug information
             print_debug("after finishing service")
 
             # If someone arrives, add them to a line and schedule another
             if arrival_time <= current_time and customers_left > 0:
-                line_index = self.handle_arrival(lines)
-                lines[line_index].append(customer.Customer(services.__next__()))
+                new_customer = customer.Customer(services.__next__())
+                line_index = self.handle_arrival(lines, new_customer)
+                lines[line_index].append(new_customer)
                 customers_left -= 1
-                lines_to_count.append(line_index)
                 # Ensure that we haven't run out of debug delays
                 if customers_left != 0:
                     arrival_time = current_time + arrivals.__next__()
@@ -71,13 +83,9 @@ class Bank(object):
                     in_service[i] = True
                     line_index = self.handle_service(lines)
                     served_customer = lines[line_index].pop(0)
+                    line_lengths.append(served_customer.line_length)
                     wait_times.append(served_customer.wait_time)
                     service_times[i] = current_time + served_customer.task_time
-
-            # Record line length if someone just arrived
-            for line_index in lines_to_count:
-                line_lengths.append(len(lines[line_index]))
-            lines_to_count = []
 
             # Print debug information
             print_debug("after starting new service")
@@ -90,13 +98,13 @@ class Bank(object):
                 current_time += 1
                 for line in lines:
                     for i in range(len(line)):
-                        line[i].step()
+                        line[i].wait_time += 1
             # Print debug information
             print_debug("after incrementing times", newline=True)
 
         # Print additional debug information
         if debug:
-            print("Queue lengths: {}".format(line_lengths))
+            print("Line lengths: {}".format(line_lengths))
             print("Wait times: {}".format(wait_times))
 
         return statistics.mean(line_lengths), statistics.mean(wait_times)
@@ -108,8 +116,37 @@ class SimpleBank(Bank):
         self.teller_count = teller_count
         self.line_count = 1
 
-    def handle_arrival(self, lines):
+    def __repr__(self):
+        return "SimpleBank({})".format(self.teller_count)
+
+    def handle_arrival(self, lines, new_customer):
         return 0
 
     def handle_service(self, lines):
         return 0
+
+
+class PartitionBank(Bank):
+    def __init__(self, teller_count, partitions):
+        self.teller_count = teller_count
+        self.partitions = partitions
+        self.line_count = len(partitions)
+        self.line_index = 0
+
+    def __repr__(self):
+        return "PartitionBank({}, {})".format(self.teller_count, self.partitions)
+
+    def handle_arrival(self, lines, new_customer):
+        available = []
+        for i in range(len(self.partitions)):
+            if new_customer.task_time in self.partitions[i]:
+                available.append(i)
+        return random.choice(available)
+
+    def handle_service(self, lines):
+        selected = False
+        while not selected:
+            self.line_index += 1
+            self.line_index %= self.line_count
+            selected = len(lines[self.line_index]) != 0
+        return self.line_index

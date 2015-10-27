@@ -19,3 +19,4 @@ def random_times(p):
             remaining -= probability
             if remaining <= r:
                 yield category
+                break
