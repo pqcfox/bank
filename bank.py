@@ -1,6 +1,7 @@
 import abc
 import statistics
 
+import customer
 import settings
 import times
 
@@ -55,7 +56,7 @@ class Bank(object):
             # If someone arrives, add them to a line and schedule another
             if arrival_time <= current_time and customers_left > 0:
                 line_index = self.handle_arrival(lines)
-                lines[line_index].append(0)
+                lines[line_index].append(customer.Customer(services.__next__()))
                 customers_left -= 1
                 lines_to_count.append(line_index)
                 # Ensure that we haven't run out of debug delays
@@ -69,8 +70,9 @@ class Bank(object):
                 if not in_service[i] and any([len(line) > 0 for line in lines]):
                     in_service[i] = True
                     line_index = self.handle_service(lines)
-                    wait_times.append(lines[line_index].pop(0))
-                    service_times[i] = current_time + services.__next__()
+                    served_customer = lines[line_index].pop(0)
+                    wait_times.append(served_customer.wait_time)
+                    service_times[i] = current_time + served_customer.task_time
 
             # Record line length if someone just arrived
             for line_index in lines_to_count:
@@ -88,7 +90,7 @@ class Bank(object):
                 current_time += 1
                 for line in lines:
                     for i in range(len(line)):
-                        line[i] += 1
+                        line[i].step()
             # Print debug information
             print_debug("after incrementing times", newline=True)
 
